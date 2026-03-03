@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TicTacToe Online</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>TicTacToe Online</h1>
+      <p class="subtitle">Play from different machines using a shared room code.</p>
+
+      <section class="panel controls">
+        <div class="mode-buttons">
+          <button id="createRoomBtn">Create Room</button>
+          <div class="join-wrap">
+            <input id="roomInput" maxlength="6" placeholder="Room code" />
+            <button id="joinRoomBtn">Join Room</button>
+          </div>
+        </div>
+        <p id="connectionState" class="muted">Not connected.</p>
+      </section>
+
+      <section class="panel game">
+        <div class="meta">
+          <p>Room: <strong id="roomCode">-</strong></p>
+          <p>You are: <strong id="playerRole">-</strong></p>
+          <p id="status">Create or join a room to start.</p>
+        </div>
+
+        <div id="board" class="board" aria-label="Tic Tac Toe board"></div>
+
+        <div class="actions">
+          <button id="resetBtn" disabled>Reset Game</button>
+          <button id="leaveBtn" disabled>Leave Room</button>
+        </div>
+      </section>
+
+      <section class="panel note">
+        <p>
+          If online play is unavailable, create <code>config.js</code> from
+          <code>config.example.js</code> with your Firebase project config.
+        </p>
+      </section>
+    </main>
+
+    <script src="config.js"></script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
