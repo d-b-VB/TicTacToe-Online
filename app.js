@@ -1,32 +1,29 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import {
-  getDatabase,
-  onValue,
-  ref,
-  runTransaction,
-  set,
-  update,
-  onDisconnect
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
-
 const boardEl = document.getElementById("board");
 const statusEl = document.getElementById("status");
-const roomCodeEl = document.getElementById("roomCode");
 const playerRoleEl = document.getElementById("playerRole");
 const connectionStateEl = document.getElementById("connectionState");
-const createRoomBtn = document.getElementById("createRoomBtn");
-const joinRoomBtn = document.getElementById("joinRoomBtn");
-const roomInput = document.getElementById("roomInput");
 const resetBtn = document.getElementById("resetBtn");
-const leaveBtn = document.getElementById("leaveBtn");
+const disconnectBtn = document.getElementById("disconnectBtn");
+
+const createOfferBtn = document.getElementById("createOfferBtn");
+const connectAnswerBtn = document.getElementById("connectAnswerBtn");
+const createAnswerBtn = document.getElementById("createAnswerBtn");
+const hostOfferOut = document.getElementById("hostOfferOut");
+const hostAnswerIn = document.getElementById("hostAnswerIn");
+const guestOfferIn = document.getElementById("guestOfferIn");
+const guestAnswerOut = document.getElementById("guestAnswerOut");
 
 const CELLS = 9;
-const initialBoard = Array(CELLS).fill("");
+const initialState = {
+  board: Array(CELLS).fill(""),
+  turn: "X",
+  winner: null
+};
 
-let db = null;
-let currentRoom = null;
+let peer = null;
+let channel = null;
 let role = null;
-let roomUnsubscribe = null;
+let state = structuredClone(initialState);
 
 for (let i = 0; i < CELLS; i += 1) {
   const btn = document.createElement("button");
@@ -36,11 +33,35 @@ for (let i = 0; i < CELLS; i += 1) {
   boardEl.appendChild(btn);
 }
 
-function drawBoard(board = initialBoard, isMyTurn = false, isGameOver = false) {
+function setConnection(text) {
+  connectionStateEl.textContent = text;
+}
+
+function encode(obj) {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+}
+
+function decode(text) {
+  return JSON.parse(decodeURIComponent(escape(atob(text.trim()))));
+}
+
+function drawBoard() {
+  const myTurn = state.turn === role;
+  const gameOver = Boolean(state.winner);
   [...boardEl.children].forEach((cell, idx) => {
-    cell.textContent = board[idx] || "";
-    cell.disabled = !isMyTurn || Boolean(board[idx]) || isGameOver;
+    cell.textContent = state.board[idx];
+    cell.disabled = !channel || channel.readyState !== "open" || !myTurn || Boolean(state.board[idx]) || gameOver;
   });
+
+  if (!channel || channel.readyState !== "open") {
+    statusEl.textContent = "Connect both players to start.";
+  } else if (state.winner === "draw") {
+    statusEl.textContent = "Draw game.";
+  } else if (state.winner) {
+    statusEl.textContent = `${state.winner} wins.`;
+  } else {
+    statusEl.textContent = myTurn ? "Your turn." : "Opponent's turn.";
+  }
 }
 
 function checkWinner(board) {
@@ -64,138 +85,169 @@ function checkWinner(board) {
   return board.every(Boolean) ? "draw" : null;
 }
 
-function randomCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
-}
+function createPeer(asHost) {
+  if (peer) peer.close();
 
-function updateButtons(inRoom) {
-  resetBtn.disabled = !inRoom;
-  leaveBtn.disabled = !inRoom;
-}
-
-function setConnection(text) {
-  connectionStateEl.textContent = text;
-}
-
-function initFirebase() {
-  if (!window.FIREBASE_CONFIG || window.FIREBASE_CONFIG.apiKey?.includes("YOUR_")) {
-    setConnection("Online mode unavailable: add Firebase config.");
-    return;
-  }
-
-  const app = initializeApp(window.FIREBASE_CONFIG);
-  db = getDatabase(app);
-  setConnection("Connected to realtime backend.");
-}
-
-async function createRoom() {
-  if (!db) return;
-  const code = randomCode();
-  const roomRef = ref(db, `rooms/${code}`);
-  await set(roomRef, {
-    board: initialBoard,
-    turn: "X",
-    winner: null,
-    players: { X: true, O: false },
-    updatedAt: Date.now()
+  peer = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
-  await joinRoom(code, "X");
+
+  peer.onconnectionstatechange = () => {
+    setConnection(`WebRTC: ${peer.connectionState}`);
+    if (peer.connectionState === "connected") {
+      resetBtn.disabled = false;
+      disconnectBtn.disabled = false;
+    }
+    if (["disconnected", "failed", "closed"].includes(peer.connectionState)) {
+      resetBtn.disabled = true;
+      disconnectBtn.disabled = true;
+    }
+    drawBoard();
+  };
+
+  if (asHost) {
+    channel = peer.createDataChannel("tictactoe");
+    wireChannel();
+  } else {
+    peer.ondatachannel = event => {
+      channel = event.channel;
+      wireChannel();
+    };
+  }
 }
 
-async function joinRoom(code, preferredRole = null) {
-  if (!db) return;
-  const normalized = code.trim().toUpperCase();
-  if (!normalized) return;
-
-  const roomRef = ref(db, `rooms/${normalized}`);
-
-  let assignedRole = preferredRole;
-  if (!assignedRole) {
-    const slot = await runTransaction(ref(db, `rooms/${normalized}/players/O`), current => {
-      if (current === false) return true;
-      return current;
-    });
-
-    assignedRole = slot.committed && slot.snapshot.val() === true ? "O" : null;
+function send(payload) {
+  if (channel && channel.readyState === "open") {
+    channel.send(JSON.stringify(payload));
   }
+}
 
-  if (!assignedRole) {
-    statusEl.textContent = "Room full or unavailable.";
-    return;
-  }
-
-  currentRoom = normalized;
-  role = assignedRole;
-  roomCodeEl.textContent = normalized;
-  playerRoleEl.textContent = role;
-  updateButtons(true);
-
-  onDisconnect(ref(db, `rooms/${normalized}/players/${role}`)).set(false);
-
-  if (roomUnsubscribe) roomUnsubscribe();
-  roomUnsubscribe = onValue(roomRef, snap => {
-    const room = snap.val();
-    if (!room) {
-      statusEl.textContent = "Room closed.";
-      leaveRoom();
+function wireChannel() {
+  channel.onopen = () => {
+    setConnection("Connected. You can play now.");
+    drawBoard();
+    if (role === "X") send({ type: "state", state });
+  };
+  channel.onclose = () => {
+    setConnection("Disconnected.");
+    drawBoard();
+  };
+  channel.onmessage = event => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "state") {
+      state = msg.state;
+      drawBoard();
       return;
     }
 
-    const winner = room.winner;
-    const myTurn = room.turn === role;
-    drawBoard(room.board, myTurn, Boolean(winner));
+    if (msg.type === "move" && role === "X") {
+      applyMove(msg.idx, "O");
+    }
 
-    if (winner === "draw") statusEl.textContent = "Draw game.";
-    else if (winner) statusEl.textContent = `${winner} wins.`;
-    else statusEl.textContent = myTurn ? "Your turn." : "Opponent's turn.";
-  });
+    if (msg.type === "reset" && role === "X") {
+      state = structuredClone(initialState);
+      send({ type: "state", state });
+      drawBoard();
+    }
+  };
 }
 
-async function placeMove(idx) {
-  if (!db || !currentRoom || !role) return;
-
-  const roomRef = ref(db, `rooms/${currentRoom}`);
-  await runTransaction(roomRef, room => {
-    if (!room || room.winner || room.turn !== role || room.board[idx]) return room;
-    room.board[idx] = role;
-    room.winner = checkWinner(room.board);
-    room.turn = role === "X" ? "O" : "X";
-    room.updatedAt = Date.now();
-    return room;
-  });
+function applyMove(idx, player) {
+  if (state.winner || state.turn !== player || state.board[idx]) return;
+  state.board[idx] = player;
+  state.winner = checkWinner(state.board);
+  state.turn = player === "X" ? "O" : "X";
+  send({ type: "state", state });
+  drawBoard();
 }
 
-async function resetGame() {
-  if (!db || !currentRoom) return;
-  await update(ref(db, `rooms/${currentRoom}`), {
-    board: initialBoard,
-    turn: "X",
-    winner: null,
-    updatedAt: Date.now()
-  });
-}
+function placeMove(idx) {
+  if (!channel || channel.readyState !== "open") return;
 
-async function leaveRoom() {
-  if (!db || !currentRoom || !role) {
-    drawBoard(initialBoard, false, false);
-    return;
+  if (role === "X") {
+    applyMove(idx, "X");
+  } else if (role === "O") {
+    send({ type: "move", idx });
   }
-
-  await set(ref(db, `rooms/${currentRoom}/players/${role}`), false);
-  currentRoom = null;
-  role = null;
-  roomCodeEl.textContent = "-";
-  playerRoleEl.textContent = "-";
-  statusEl.textContent = "Create or join a room to start.";
-  updateButtons(false);
-  if (roomUnsubscribe) roomUnsubscribe();
-  drawBoard(initialBoard, false, false);
 }
 
-createRoomBtn.addEventListener("click", createRoom);
-joinRoomBtn.addEventListener("click", () => joinRoom(roomInput.value));
-resetBtn.addEventListener("click", resetGame);
-leaveBtn.addEventListener("click", leaveRoom);
+async function waitIceComplete(pc) {
+  if (pc.iceGatheringState === "complete") return;
+  await new Promise(resolve => {
+    const onState = () => {
+      if (pc.iceGatheringState === "complete") {
+        pc.removeEventListener("icegatheringstatechange", onState);
+        resolve();
+      }
+    };
+    pc.addEventListener("icegatheringstatechange", onState);
+  });
+}
 
-initFirebase();
-drawBoard(initialBoard, false, false);
+createOfferBtn.addEventListener("click", async () => {
+  role = "X";
+  playerRoleEl.textContent = role;
+  state = structuredClone(initialState);
+  createPeer(true);
+
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  await waitIceComplete(peer);
+
+  hostOfferOut.value = encode(peer.localDescription.toJSON());
+  setConnection("Offer created. Share it with guest.");
+  drawBoard();
+});
+
+createAnswerBtn.addEventListener("click", async () => {
+  const offerText = guestOfferIn.value.trim();
+  if (!offerText) return;
+
+  role = "O";
+  playerRoleEl.textContent = role;
+  state = structuredClone(initialState);
+  createPeer(false);
+
+  const offer = decode(offerText);
+  await peer.setRemoteDescription(offer);
+  const answer = await peer.createAnswer();
+  await peer.setLocalDescription(answer);
+  await waitIceComplete(peer);
+
+  guestAnswerOut.value = encode(peer.localDescription.toJSON());
+  setConnection("Answer created. Send it back to host.");
+  drawBoard();
+});
+
+connectAnswerBtn.addEventListener("click", async () => {
+  const answerText = hostAnswerIn.value.trim();
+  if (!answerText || !peer) return;
+  await peer.setRemoteDescription(decode(answerText));
+  setConnection("Answer connected. Waiting for guest...");
+  drawBoard();
+});
+
+resetBtn.addEventListener("click", () => {
+  if (!channel || channel.readyState !== "open") return;
+
+  state = structuredClone(initialState);
+  drawBoard();
+  if (role === "X") send({ type: "state", state });
+  else send({ type: "reset" });
+});
+
+disconnectBtn.addEventListener("click", () => {
+  if (channel) channel.close();
+  if (peer) peer.close();
+  channel = null;
+  peer = null;
+  role = null;
+  state = structuredClone(initialState);
+  playerRoleEl.textContent = "-";
+  resetBtn.disabled = true;
+  disconnectBtn.disabled = true;
+  setConnection("Not connected.");
+  drawBoard();
+});
+
+drawBoard();

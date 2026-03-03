@@ -9,43 +9,51 @@
   <body>
     <main class="app">
       <h1>TicTacToe Online</h1>
-      <p class="subtitle">Play from different machines using a shared room code.</p>
+      <p class="subtitle">Play on different machines with no account setup.</p>
 
-      <section class="panel controls">
-        <div class="mode-buttons">
-          <button id="createRoomBtn">Create Room</button>
-          <div class="join-wrap">
-            <input id="roomInput" maxlength="6" placeholder="Room code" />
-            <button id="joinRoomBtn">Join Room</button>
+      <section class="panel">
+        <h2>Connection Setup (copy/paste once)</h2>
+        <ol>
+          <li>Host clicks <strong>Create Offer</strong> and shares the offer text.</li>
+          <li>Guest pastes offer, clicks <strong>Create Answer</strong>, shares answer text back.</li>
+          <li>Host pastes answer and clicks <strong>Connect Answer</strong>.</li>
+        </ol>
+
+        <div class="signal-grid">
+          <div>
+            <h3>Host</h3>
+            <button id="createOfferBtn">Create Offer</button>
+            <textarea id="hostOfferOut" readonly placeholder="Host offer appears here"></textarea>
+            <textarea id="hostAnswerIn" placeholder="Paste guest answer here"></textarea>
+            <button id="connectAnswerBtn">Connect Answer</button>
+          </div>
+
+          <div>
+            <h3>Guest</h3>
+            <textarea id="guestOfferIn" placeholder="Paste host offer here"></textarea>
+            <button id="createAnswerBtn">Create Answer</button>
+            <textarea id="guestAnswerOut" readonly placeholder="Guest answer appears here"></textarea>
           </div>
         </div>
+
         <p id="connectionState" class="muted">Not connected.</p>
       </section>
 
       <section class="panel game">
         <div class="meta">
-          <p>Room: <strong id="roomCode">-</strong></p>
           <p>You are: <strong id="playerRole">-</strong></p>
-          <p id="status">Create or join a room to start.</p>
+          <p id="status">Connect both players to start.</p>
         </div>
 
         <div id="board" class="board" aria-label="Tic Tac Toe board"></div>
 
         <div class="actions">
           <button id="resetBtn" disabled>Reset Game</button>
-          <button id="leaveBtn" disabled>Leave Room</button>
+          <button id="disconnectBtn" disabled>Disconnect</button>
         </div>
-      </section>
-
-      <section class="panel note">
-        <p>
-          If online play is unavailable, create <code>config.js</code> from
-          <code>config.example.js</code> with your Firebase project config.
-        </p>
       </section>
     </main>
 
-    <script src="config.js"></script>
     <script type="module" src="app.js"></script>
   </body>
 </html>
